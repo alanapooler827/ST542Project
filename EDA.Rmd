@@ -1,0 +1,72 @@
+---
+title: "EDA"
+output: html_notebook
+---
+
+Import libraries
+```{r warning=FALSE}
+library(tidyverse)
+```
+
+
+## Read in Data
+```{r}
+df <- read.csv("cafo-wq-data.csv")
+```
+
+## Initial EDA:
+In order to construct an analysis plan and propose an appropriate model, we need to preform some exploratory data analysis.
+
+Data structure
+
+A lot of columns- do we want to/can we filter down to one spatial scale?
+```{r}
+str(df)
+```
+Check for missing values
+```{r}
+sum_na <- function(column){
+ sum(is.na(column))
+}
+
+df |> summarize(across(everything(), sum_na))
+```
+
+Should response variables be log transformed?
+Histograms of raw & log transformed continuous response variables
+```{r}
+# histograms of raw response variables
+par(mfrow = c(2, 3))
+
+hist(df$fecalcoliformcol100ml,
+     main = 'Fecal coliform',
+     xlab = 'Count',
+     breaks = 30)
+
+hist(df$no2no3mgl,
+     main = 'Nitrate/nitrite',
+     xlab = 'mg/L',
+     breaks = 30)
+
+hist(df$phosphorusmgl,
+     main = 'Phosphorus',
+     xlab = 'mg/L',
+     breaks = 30)
+
+# histograms of log-transformed response variables
+hist(df$feclog,
+     main = 'Log fecal coliform',
+     xlab = 'log value',
+     breaks = 30)
+
+hist(df$nitlog,
+     main = 'Log nitrate/nitrite',
+     xlab = 'log value',
+     breaks = 30)
+
+hist(df$phoslog,
+     main = 'Log phosphorus',
+     xlab = 'log value',
+     breaks = 30)
+```
+
