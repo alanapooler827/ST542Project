@@ -6,6 +6,7 @@ output: html_notebook
 Import libraries
 ```{r warning=FALSE}
 library(tidyverse)
+library(ggplot)
 ```
 
 
@@ -17,13 +18,36 @@ df <- read.csv("cafo-wq-data.csv")
 ## Initial EDA:
 In order to construct an analysis plan and propose an appropriate model, we need to preform some exploratory data analysis.
 
-Data structure
-
-A lot of columns- do we want to/can we filter down to one spatial scale?
+Data structure:
+A lot of columns- can we filter any out?
 ```{r}
-str(df)
+# function to get structure as data frame so it can be shown as paged output
+str_as_df <- function(x) {
+  data.frame(
+    Variable = names(x),
+    Class = sapply(x, function(col) paste(class(col), collapse = ", ")),
+    Values = sapply(x, function(col) paste(head(col, n = 4), collapse = ", ")),
+    row.names = NULL
+  )
+}
+
+# apply function
+df_str <- str_as_df(df)
+paged_table(df_str)
 ```
+
+Format date column
+```{r}
+df <- df |>
+  mutate(date = format(mdy(date), "%m/%d/%Y"))
+```
+
+
 Check for missing values
+
+Some variables have a lot of missing values- looks to be due to the spatial scales for some of them. 
+
+For the variables with missing values that are not related to spatial scales, do we need to remove those? Ex. 'nearest_upstream_poultry_cafo_di', response variables
 ```{r}
 sum_na <- function(column){
  sum(is.na(column))
@@ -32,17 +56,18 @@ sum_na <- function(column){
 df |> summarize(across(everything(), sum_na))
 ```
 
-Should response variables be log transformed?
-Histograms of raw & log transformed continuous response variables
+
+If we use the continuous versions of the response variables, should we log transform them?
+
+Before looking at the linearity of the continuous response variables, we will look at the distribution to see if a log transformation is necessary. We ony need to look at nitrate/nitrate and phosphorus concentration, since it has already been determined that we should use log transformed fecal coliform counts. 
+
+Both are very skewed right and still heavy on the right tail after transforming. The log transformed versions reduce the skew quite a bit, so we should use those. 
+
+Also should investigate the cause of the heavy right tails. 
 ```{r}
-# histograms of raw response variables
-par(mfrow = c(2, 3))
+par(mfrow = c(2, 2))
 
-hist(df$fecalcoliformcol100ml,
-     main = 'Fecal coliform',
-     xlab = 'Count',
-     breaks = 30)
-
+# raw variables
 hist(df$no2no3mgl,
      main = 'Nitrate/nitrite',
      xlab = 'mg/L',
@@ -53,12 +78,7 @@ hist(df$phosphorusmgl,
      xlab = 'mg/L',
      breaks = 30)
 
-# histograms of log-transformed response variables
-hist(df$feclog,
-     main = 'Log fecal coliform',
-     xlab = 'log value',
-     breaks = 30)
-
+# log transformed variables
 hist(df$nitlog,
      main = 'Log nitrate/nitrite',
      xlab = 'log value',
@@ -70,3 +90,91 @@ hist(df$phoslog,
      breaks = 30)
 ```
 
+
+Should we use the continuous or binary versions of the response variables?
+
+Look at the relationship between each of the continuous response variables and one of the CAFO metrics to see if the relationship is linear
+
+Use log transformed variables based on above result
+
+For the nitrate/nitrogen and phosphorus concentration variables, we will look at the raw and log transformed variables. 
+
+I'm look at the 4 metrics for upstream poultry CAFOs as the independent variables initially. If needed, I will look at the relationships with other independent variables as well. 
+
+Most of these relationships don't look to have a very strong linear relationship. Not the results I expected. A lot of them have slightly negative relationships. What does this mean? Why does upstream poultry CAFO density have a slightly positive relationship with phosphorus and nitrate/nitrite concentration, but upstream poultry CAFO count has slightly negative relationship? 
+
+Would including any temporal or spatial variables explain some of these relationships? or any of the covariates? With so many variables, what is the best way to answer this question?
+```{r warning=FALSE}
+# response vars
+responses <- c('nitlog', 'phoslog', 'feclog')
+
+# poultry CAFO metrics
+metrics <- c(
+  'upstream_poultry_cafo_density',
+  'upstream_poultry_cafo_count',
+  'weighted_poultry_cafo_load',
+  'nearest_upstream_poultry_cafo_di'
+)
+
+# function to make plot for each x and y
+make_plot <- function(data, x_var, y_var) {
+  ggplot(data, aes(x = .data[[x_var]], y = .data[[y_var]])) +
+    geom_point(alpha = 0.2) +
+    geom_smooth(method = 'lm', formula = y ~ x, se = FALSE) +
+    geom_smooth(method = 'loess', formula = y ~ x, se = FALSE, linetype = 'dashed') +
+    labs(
+      x = x_var,
+      y = y_var
+    )
+}
+
+# make all plots
+plots <- list()
+
+for (response in responses) {
+  for (metric in metrics) {
+    
+    plots[[length(plots) + 1]] <- make_plot(
+      data = df,
+      x_var = metric,
+      y_var = response
+    )
+  }
+}
+
+plots
+```
+
+Look at the same independent variables but for all CAFOs instead of just poultry to see if there is a difference in the strength of the relationship
+
+Not a huge difference from just poultry CAFOs
+```{r warning=FALSE}
+# response vars
+responses <- c('nitlog', 'phoslog', 'feclog')
+
+# CAFO metrics
+metrics <- c(
+  'upstream_cafo_density',
+  'upstream_cafo_count',
+  'weighted_cafo_load',
+  'nearest_upstream_cafo_distance_m'
+)
+
+# make all plots
+plots <- list()
+
+for (response in responses) {
+  for (metric in metrics) {
+    
+    plots[[length(plots) + 1]] <- make_plot(
+      data = df,
+      x_var = metric,
+      y_var = response
+    )
+  }
+}
+
+plots
+```
+
+Note from the analysis plan doc shared by Dr. Ercumen: 'The analysis should consider multiple spatial scales and disentangle associations with poultry CAFOs vs. all CAFOs combined. We can consider using these in their continuous form if the relationship with the response variable is linear, otherwise need categorical variables (e.g. quintiles)'
