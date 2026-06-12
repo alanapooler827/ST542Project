@@ -6,7 +6,8 @@ output: html_notebook
 Import libraries
 ```{r warning=FALSE}
 library(tidyverse)
-library(ggplot)
+library(ggplot2)
+library(rmarkdown)
 ```
 
 
