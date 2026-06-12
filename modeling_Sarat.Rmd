@@ -1,0 +1,57 @@
+---
+title: "modeling_Sarat"
+author: "Sarat Bantupalli"
+date: "2026-06-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,
+                      warning = FALSE, message = FALSE)
+```
+
+This is Sarat's progress on modeling the CAFO's data.
+
+# Libraries
+We need the following R packages to run this project.
+
+```{r}
+library(tidyverse) # for data manipulation
+library(lubridate) # for working with datetime objects
+```
+
+# Data
+Here the data is read into the R environment. Also, let us re-arrange the order of the *date* variable in the data.
+
+```{r}
+cafo_data <- read_csv("cafo-wq-data.csv") %>% 
+  relocate(date, year, station_id, latitude, longitude, 
+           feclog, no2no3mgl, phosphorusmgl, fecpos,
+           exceed_fec, exceed_nit, exceed_phos) %>% 
+  mutate(date = mdy(date)) %>% 
+  rename(fecal_coliform_count = feclog, total_nitrogen_conc = no2no3mgl, 
+         total_phosphorus_conc = phosphorusmgl, 
+         fecal_coliform_detected = fecpos,
+         fecal_coliform_exceeded = exceed_fec,
+         total_N_exceeded = exceed_nit, 
+         total_P_exceeded = exceed_phos)
+cafo_data
+```
+
+We can see that we have `r nrow(cafo_data)` observations, and `r ncol(cafo_data)` in our dataset. Let us re-arrange the order of the variables first.
+
+## Potential response variables
+The potential response variables of interest include:  
+
+ + fecal_coliform_count: Fecal coliform count, log10 transformed (log10-CFU/100 mL)  
+ + total_nitrogen_conc: Nitrate/nitrite concentration (combined as N) (mg/L)  
+ + total_phosphorus_conc: Phosphorus concentration (mg/L)  
+ + fecal_coliform_detected: a binary variable that represents if Fecal coliform is detected  
+ + fecal_coliform_exceeded : a binary variable that represents if Fecal coliform exceeds 200 CFU/100 mL  
+ + total_N_exceeded : a binary variable that represents if Nitrate/nitrite (combined as N) exceeds 1 mg/L  
+ + total_P_exceeded : a binary variable that represents if Phosphorus exceeds 0.1 mg/L  
+
+## Potential co-variates
+
+
+
