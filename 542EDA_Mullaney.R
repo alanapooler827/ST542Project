@@ -48,7 +48,10 @@ cat("Unique HUC12s:", n_distinct(water$huc12id), "\n")
 
 cat("Years:", paste(sort(unique(water$year)), collapse = ", "), "\n")
 
+cat("Years:", paste(sort(unique(water$year)), collapse = ", "), "\n")
 
+water$date <- as.Date(water$date, format = "%m/%d/%y")
+water$month <- format(water$date, "%m")        # "01", "02", ... "12"
 # ============================================================
 # 2. SUMMARY STATISTICS
 # ============================================================
@@ -216,7 +219,42 @@ p_temp_exceed <- temporal |>
 p_temp_levels / p_temp_exceed
 ggsave("eda_03_temporal.png", width = 10, height = 8, dpi = 150)
 
+# ============================================================
+# 3b. Monthly trends
+# ============================================================
 
+monthly <- water |>
+  group_by(month) |>
+  summarise(
+    feclog_mean  = mean(feclog,  na.rm = TRUE),
+    nitlog_mean  = mean(nitlog,  na.rm = TRUE),
+    phoslog_mean = mean(phoslog, na.rm = TRUE),
+    fec_exceed   = mean(exceed_fec  == 1, na.rm = TRUE),
+    nit_exceed   = mean(exceed_nit  == 1, na.rm = TRUE),
+    phos_exceed  = mean(exceed_phos == 1, na.rm = TRUE),
+    n            = n()
+  )
+
+# Mean log levels over time
+p_temp_month <- monthly |>
+  pivot_longer(c(feclog_mean, nitlog_mean, phoslog_mean),
+               names_to = "pollutant", values_to = "mean_log") |>
+  mutate(pollutant = recode(pollutant,
+                            feclog_mean  = "Fecal coliform",
+                            nitlog_mean  = "Nitrate",
+                            phoslog_mean = "Phosphorus"
+  )) |>
+
+  ggplot(aes(x = month, y = mean_log, color = pollutant, group = pollutant)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Fecal coliform" = "#378ADD",
+                                "Nitrate"         = "#1D9E75",
+                                "Phosphorus"      = "#D85A30")) +
+  labs(title = "Mean log pollutant levels by month", x = "Month",
+       y = "Mean log value", color = NULL)
+
+ggsave("eda_03b_months.png", width = 10, height = 8, dpi = 150)
 # ============================================================
 # 6. CAFO PREDICTOR RELATIONSHIPS
 # ============================================================
