@@ -1,0 +1,41 @@
+---
+title: "ST542 Project"
+author: "David Grant"
+date: "2026-06-15"
+output: html_document
+---
+
+```{r warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+df <- read.csv("cafo-wq-data.csv")
+head(df)
+```
+```{r warning = FALSE}
+df$upstream_cafo_density_binned <- cut_number(df$upstream_cafo_density, 5)
+df$upstream_cafo_count_binned <- cut_number(df$upstream_cafo_count, 5)
+df$weighted_cafo_load_binned <- cut_number(df$weighted_cafo_load, 5)
+df$nearest_upstream_cafo_distance_binned <- cut_number(df$nearest_upstream_cafo_distance_m, 5)
+```
+
+```{r warning = FALSE}
+#Plots to check that each group is equal in size
+ggplot(df, aes(x = upstream_cafo_density_binned)) + 
+  geom_bar(fill = "blue", color = "black")
+ggplot(df, aes(x = upstream_cafo_count_binned)) + 
+  geom_bar(fill = "blue", color = "black")
+ggplot(df, aes(x = weighted_cafo_load_binned)) + 
+  geom_bar(fill = "blue", color = "black")
+ggplot(df, aes(x = nearest_upstream_cafo_distance_binned)) + 
+  geom_bar(fill = "blue", color = "black")
+```
+Theoretically since working in quintiles the heights of each bar should be even.
+However, this is not the case for some of the graphs. Could this just be due to having many values at the cutoff points. It would make sense particularly for the upstream CAFO count where the first cutoff value is 2. However, the bars are still relatively even more or less so it should be mostly okay.
+
+
+
+
+
+
+
+
