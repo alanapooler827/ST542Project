@@ -1,0 +1,243 @@
+---
+title: "Variable Selection"
+output: html_notebook
+---
+
+Library & data imports
+
+```{r warning=FALSE}
+library(lme4)
+library(lmerTest)
+library(tidyverse)
+
+df <- read.csv("cafo-wq-data.csv")
+```
+
+## Data cleaning
+
+```{r}
+# format date column
+df$date <- as.Date(df$date, format = '%m/%d/%y')
+
+# extract month from date as new column
+df <- df |>
+  mutate(month = month(date))
+
+# convert columns to factors where necessary
+df <- df |>
+  mutate(
+    huc8id = as.factor(huc8id),
+    huc10id = as.factor(huc10id),
+    huc12id = as.factor(huc12id),
+    station_id = as.factor(station_id),
+    stationcategory = as.factor(stationcategory),
+    month = as.factor(month)
+  )
+```
+
+### Helper function to run stepwise selection
+
+This will select the covariates and random effects to include in a model for each predictor. Then, it will display the model comparison metrics for the selected model for each predictor so that we can determine which predictor to use.
+
+Running stepwise selection on all predictors and all covariates at the same time results in only covariates being selected for the final model, despite including a predictor resulting in better model comparison metrics.
+
+This can be reused for model selection across all spatial scales and response variables by changing the function inputs.
+
+```{r}
+cafo_model_selection <- function(data, response, predictors, covariates, random_effects) {
+  
+  full_models <- list()
+  step_results <- list()
+  selected_models <- list()
+  
+  for (predictor in predictors) {
+    
+    fixed_effects <- paste(
+      c(predictor, covariates),
+      collapse = ' + '
+    )
+    
+    model_formula <- as.formula(
+      paste(
+        response,
+        '~',
+        fixed_effects,
+        random_effects
+      )
+    )
+    
+    # since we are doing model comparison, use REML = FALSE
+    # when fitting final models it will be changed to REML = TRUE
+    full_model <- lmer(
+      model_formula,
+      data = data,
+      REML = FALSE
+    )
+    
+    # run stepwise selection
+    step_result <- step(
+      full_model,
+      keep = predictor
+    )
+    
+    selected_model <- get_model(step_result)
+    
+    full_models[[predictor]] <- full_model
+    step_results[[predictor]] <- step_result
+    selected_models[[predictor]] <- selected_model
+  }
+  
+  # print evaluation metrics for selected model for each predictor
+  model_summary <- data.frame(
+    response = response,
+    predictor = names(selected_models),
+    AIC = sapply(selected_models, AIC),
+    BIC = sapply(selected_models, BIC),
+    logLik = sapply(selected_models, function(x) as.numeric(logLik(x)))
+  ) |>
+    arrange(AIC)
+  
+  # store best model
+  best_predictor <- model_summary$predictor[1]
+  best_model <- selected_models[[best_predictor]]
+  
+  list(
+    response = response,
+    full_models = full_models,
+    selected_models = selected_models,
+    model_summary = model_summary,
+    best_predictor = best_predictor,
+    best_model = best_model
+  )
+}
+```
+
+## Stepwise selection: All CAFO metrics, spatial scale = huc12
+
+First we will do stepwise selection for all three of the continuous log transformed response variables using the all CAFO types predictor variables.
+
+Scale predictor variables in a way that will make model coefficients more interpretable. Scales were chosen based on range of values for each predictor. Without scaling, models give warnings about variables being on different scales.
+
+Interpretation of coefficients after scaling: expected change in the response for each X unit increase in {predictor variable}
+
+Covariates are currently not being scaled as scaling them had no effect on the models
+
+We also need to remove missing values from predictors that are being tested or else we will get an error when running the stepwise selection
+
+```{r}
+huc12_df <- df |>
+  drop_na(huc12_nearest_upstream_cafo_dist)
+
+# scale predictors
+huc12_df <- huc12_df |>
+  mutate(
+    huc12_upstream_cafo_density_scaled = huc12_upstream_cafo_density / 0.1,
+    huc12_upstream_cafo_count_scaled = huc12_upstream_cafo_count / 10,
+    huc12_weighted_cafo_load_scaled = huc12_weighted_cafo_load / 10,
+    huc12_nearest_upstream_cafo_dist_scaled = huc12_nearest_upstream_cafo_dist / 1000
+  )
+```
+
+Define predictors and covariates to test in stepwise selection
+
+```{r}
+# scaled cafo predictors to test one at a time
+all_cafo_predictors <- c(
+  'huc12_upstream_cafo_density_scaled',
+  'huc12_upstream_cafo_count_scaled',
+  'huc12_weighted_cafo_load_scaled',
+  'huc12_nearest_upstream_cafo_dist_scaled'
+)
+
+# covariates for backward elimination
+covariates <- c(
+  'huc12_pop_density',
+  'huc12_pct_cropland',
+  'huc12_upstream_wastewater_count',
+  'huc12_upstream_landfill_count',
+  'huc12_upstream_other_npdes_count',
+  'stationcategory',
+  'month'
+)
+```
+
+Note that huc12id is not included in the random effects in the following models because there is a high degree of confounding between the huc12's and stations.
+
+huc10id is also not included in the random effects for the following models because including it resulted in a singular fit warning because the random effect was \~0.
+
+### Nitrite/nitrate concentration
+
+Including huc10id in the random effects resulted in a singular fit warning because the random effect was \~0 so it was excluded.
+
+Best predictor: huc12_nearest_upstream_cafo_dist_scaled
+
+```{r}
+nitlog_results <- cafo_model_selection(huc12_df,
+                                       response = 'nitlog',
+                                       all_cafo_predictors,
+                                       covariates,
+                                       random_effects = '+ (1 | huc8id / station_id)')
+nitlog_results
+```
+
+Best formula: nitlog \~ nearest_upstream_cafo_dist_scaled + stationcategory + month + (1 \| huc8id/station_id)
+
+AIC = 20485.3
+
+```{r}
+summary(nitlog_results$best_model)
+```
+
+### Stepwise selection for fecal coliform count
+
+Best predictor = huc12_nearest_upstream_cafo_dist_scaled
+
+```{r}
+feclog_results <- cafo_model_selection(huc12_df,
+                                       response = 'feclog',
+                                       all_cafo_predictors,
+                                       covariates,
+                                       random_effects =  '+ (1 | huc8id / station_id)')
+feclog_results
+```
+
+Best model
+
+formula: feclog \~ nearest_upstream_cafo_dist_scaled + huc12_upstream_other_npdes_count +\
+stationcategory + month + (1 \| huc8id/station_id) AIC = 23061.5
+
+```{r}
+summary(feclog_results$best_model)
+```
+
+### Stepwise selection for phosphorus
+
+In this model, including huc10id did not result in a singular fit warning, but it did not improve the model, so it was excluded for consistency.
+
+best predictor = huc12_nearest_upstream_cafo_dist_scaled
+
+```{r}
+phoslog_results <- cafo_model_selection(huc12_df,
+                                       response = 'phoslog',
+                                       all_cafo_predictors,
+                                       covariates,
+                                       random_effects = '+ (1 | huc8id / station_id)')
+phoslog_results
+```
+
+Best model
+
+Formula: phoslog \~ huc12_nearest_upstream_cafo_dist_scaled + huc12_upstream_other_npdes_count +\
+stationcategory + month + (1 \| station_id:huc10id:huc8id) + (1 \| huc8id)
+
+```{r}
+summary(phoslog_results$best_model)
+```
+
+huc12_nearest_upstream_cafo_dist_scaled was the best predictor for all of the models tested above.
+
+## To-do:
+
+-   Test models with separate metrics for poultry, swine, and other CAFOs in same model
+-   Fit selected models and evaluate their performance
+-   Sensitivity analysis
