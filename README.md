@@ -10,4 +10,4 @@ The analysis-ready data set includes multiple CAFO exposure metrics, such as CAF
 
 The data set also includes several measures of stream water quality, including fecal coliform counts, nitrate/nitrite concentrations, and phosphorus concentrations. These measures will serve as the primary response variables in the analysis.
 
-The data set contains monthly water quality measurements collected from 145 monitoring stations in the Cape Fear River Basin, with a total of 12,156 observations.
+The data set contains monthly water quality measurements collected from 105 monitoring stations in the Cape Fear River Basin, with a total of 12,156 observations.
