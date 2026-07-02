@@ -1,0 +1,632 @@
+---
+title: "EDA_Sarat"
+author: "Sarat Bantupalli"
+date: "2026-06-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,
+                      warning = FALSE, message = FALSE)
+```
+
+# Introduction
+The state of North Carolina has approximately 7,500 Concentrated Animal Feeding Operations (CAFO's) which are industrial-scale agricultural facilities. CAFO's usually have large numbers of animals being raised in a confined, high-density setting. 2,500 of these CAFO's are estimated to be swine while 4,800 to be poultry.  
+
+Annually, swine CAFO's release about 10 billion gallons of wet waste, and as a result need an environmental permit for discharge of any waste. On the another hand, poultry CAFO's release about 2 million tons of dry waste and do not require any permit. This project aims to fill the data gap on the effects of poultry CAFO's on the environment, specifically on water quality parameters in the Cape Fear River Basin.  
+
+The primary goals of this project can broadly be divided into the following:  
+
+ + understand the effects of poultry and swine CAFO's on water quality in Cape Fear river basin  
+ + quantify the spatial impact of CAFO's on water quality: at what spatial scale (basin, sub-basin, watershed, sub-watershed) and distance do the upstream CAFO's impact water quality at a monitoring station  
+ + model the data using appropriate predictors while accounting for the influence of confounding variables  
+
+
+## Organization of Analysis
+Analysis for the project is divided into two parts. Part 1 (this document) deals with the identifying trends in data, and Part 2 deals with modeling the data.  
+
+Part 1, EDA part, can further be divided into the following sections, each telling a unique story about the complexity in our dataset:  
+
+ + distribution section: this section will identify distribution in data and aid us in determining transformations of variables, if needed  
+ + hierarchical structure section: this section through plots will identify trends in the hierarchical nature of the data  
+ + temporal structure section: this section will identify trends in the time-varying aspect of our variables  
+
+
+## Data
+The data for this project was collected using publicly available geographic information systems (GIS) databases from 2016 through 2022. Repeated measurements were taken for several water quality parameters at 105 monitoring stations in the river basin. 
+
+
+## Response Variables
+The response variables of interest include:  
+
+ + feclog: fecal coliform count, log10 transformed (log10-CFU/100 mL)  
+ + no2no3mgl: Nitrate/Nitrite concentration (combined as N) (mg/L)  
+ + phosphorusmgl: Phosphorus concentration (mg/L)  
+ + fecpos: a binary variable that represents if fecal coliform is detected  
+ + exceed_fec: a binary variable that represents if fecal coliform count exceeds 200 CFU/100 mL  
+ + exceed_nit: a binary variable that represents if Nitrate/Nitrite (combined as N) concentration exceeds 1 mg/L  
+ + exceed_phos: a binary variable that represents if Phosphorus concentration exceeds 0.1 mg/L  
+
+
+## Predictor Variables
+Predictor variables vary based on the hierarchical structure under consideration. Here is a generic description of predictor variables of interest:  
+
+ + upstream CAFO count : number of CAFO's upstream of a monitoring station  
+ + weighted CAFO load: distance-weighted number of CAFO's upstream of a monitoring station- this variable combines distance and count information  
+ + upstream CAFO density : density of poultry CAFOs (number per unit area) upstream of monitoring station  
+ + nearest upstream CAFO : distance between monitoring station and nearest upstream CAFO  
+
+## Confounding variables
+Information on confounding variables was recorded as part of data collection. Here is a general description of the confounding variables:  
+
+ + upstream wastewater count : number of upstream wastewater treatment plant discharges  
+ + upstream landfill count : number of upstream active landfills  
+ + upstream other NPDES count : number of upstream other NPDES discharge permits  
+ + population density : human population density  
+ + percent cropland : percent of cropland  
+ + percent crop pasture : percent of cropland including pasture/hay (alternative to percent of cropland)  
+ + stationcategory : basin segment (upper, middle, lower)  
+
+
+## Required R Packages
+The following R packages are required to run this analysis.
+
+```{r}
+library(tidyverse) # for data manipulation, plotting
+library(lubridate) # for working with datetime objects
+library(nhdplusTools) # provides data on watershed boundaries, river networks- used for plotting the Cape Fear River basin
+library(sf) # for handling spatial vector data
+```
+
+# Data
+Here the raw data is read, and then transformed for further analysis.  
+
+The `read_csv()` function from `tidyverse` package is used to read the raw data. The columns are then re-arranged to have variables of interest at the beginning of the data frame. 
+
+```{r}
+# read the data and re-arrange columns
+cafo_data <- read_csv("cafo-wq-data-rev.csv") %>% # read the csv file
+  # re-arrange the order of columns
+  relocate(date, year, station_id, latitude, longitude, 
+           feclog, no2no3mgl, nitlog, phosphorusmgl, phoslog, fecpos,
+           exceed_fec, exceed_nit, exceed_phos, stationcategory) %>% 
+  # transform date from as.character object to a datetime object 
+  mutate(date = mdy(date)) %>% # mutate a character string to date 
+  mutate(year = year(date), month = month(date))
+cafo_data # print first few observations of the data frame
+```
+
+We can see that we have *`r nrow(cafo_data)` observations*, and *`r ncol(cafo_data)` variables* in our dataset. 
+
+
+# General Exploratory Data Analysis
+In this section, we will look at the general trends in data.  
+
+First, let us look at the number of unique monitoring stations we have.
+
+```{r}
+unique_stations <- cafo_data %>% summarise(unique_station_IDs = n_distinct(station_id))
+unique_stations 
+```
+
+We can see that we have data for **`r unique_stations$unique_station_IDs` unique monitoring stations**. Let us look at the number of observations we have at each monitoring station. 
+
+```{r}
+cafo_data %>% count(station_id, sort = TRUE)
+```
+
+We can see from the output above that the number of observations per monitoring station is not constant. In other words, we have an **unbalanced data set** with respect to observations per monitoring station.  
+
+Let us visualize the above table on a map. First the required mapping for Cape Fear River Basin is downloaded.
+
+```{r}
+# Directly download the Cape Fear HUC8 subbasins using their IDs
+cape_fear_basin <- get_huc(id = c("03030001", "03030002", "03030003", 
+                                  "03030004", "03030005", "03030006", "03030007"), 
+                           type = "huc08")
+unified_boundary <- st_union(cape_fear_basin)
+# Download the river flowlines directly using the basin polygons
+cape_fear_rivers <- get_nhdplus(AOI = unified_boundary, realization = "flowline")
+# Get the NC state boundary cleanly from ggplot's map data
+nc_state <- map_data("state", region = "north carolina")
+# Create a copy of the data and round coordinates to standardize locations
+clean_data <- cafo_data
+clean_data$longitude <- round(clean_data$longitude, 3)
+clean_data$latitude <- round(clean_data$latitude, 3)
+
+# Group by the rounded coordinates to get an accurate count per site
+location_counts <- clean_data %>%
+  group_by(longitude, latitude) %>%
+  summarize(measurement_count = n(), .groups = 'drop')
+
+# Convert to sf spatial object and match map projection
+points_sf <- st_as_sf(location_counts, coords = c("longitude", "latitude"), crs = 4326)
+points_sf <- st_transform(points_sf, st_crs(cape_fear_basin))
+# Sort so larger bubbles are drawn first (background) and smaller ones on top
+points_sf <- points_sf[order(-points_sf$measurement_count), ]
+```
+
+Let us plot the data now.
+
+```{r}
+plot1 <- ggplot() + 
+  # Background NC outline (entire state)
+  geom_polygon(data = nc_state, aes(x = long, y = lat, group = group), 
+               fill = "#f5f5f5", color = "#dcdcdc", linewidth = 0.5) +
+  # Main Layer: HUC8 subbasins with categorical colors
+  geom_sf(data = cape_fear_basin, aes(fill = name), 
+          color = "white", linewidth = 0.6, alpha = 0.85) +
+  # Thick outer boundary line to frame the entire combined basin
+  geom_sf(data = st_union(cape_fear_basin), fill = NA, color = "#222222", 
+          linewidth = 1.3) +
+  # River paths inside the basin
+  geom_sf(data = cape_fear_rivers, color = "#4a5568", linewidth = 0.45) +  
+  # Main Points Layer (Changed fill to deep navy blue with a white border)
+  geom_sf(data = points_sf, aes(size = measurement_count), 
+          color = "#ffffff", fill = "#001f3f", shape = 21, stroke = 0.6, 
+          alpha = 0.9) +
+  # Control the bubble size range
+  scale_size_continuous(range = c(1.5, 7.5), name = "Measurements") +
+  # Categorical colors for the 7 HUC8 subbasins
+  scale_fill_brewer(palette = "Set3") +
+  # Canvas layout (no hard limits = shows full state)
+  coord_sf(expand = FALSE) +
+  theme_minimal() + 
+  labs(title = "Cape Fear River Basin - HUC8 Data Sampling Density",
+    subtitle = "Bubble size represents measurement counts across subbasins",
+    fill = "Subbasin Name") +
+  theme(legend.position = "right", 
+        legend.title = element_text(face = "bold"),
+        plot.title = element_text(face = "bold", size = 14),
+        panel.background = element_rect(fill = "#edf4f9", color = NA))
+plot1
+```
+
+We can see that we have more monitoring stations along the southeast compared. Also the stations along the southeast have more compared to other areas of the river basin. This suggests **we have an unbalanced dataset**. 
+
+
+# EDA for Distribution in data
+Here EDA is performed to identify distributions in our dataset. We will separate the EDA for response, explanatory, and confounding variables.
+
+## Response Variables EDA
+Here the EDA for response variables is performed.
+
+### Fecal Coliform Count
+*This variable is already log-transformed*. Let us look at numerical statistics for this variable.
+
+```{r}
+summary(cafo_data[, c("feclog")])
+```
+
+We can see that the log-transformed coliform count data is with the mean and median being reasonably close. This suggests a symmetric distribution. The following histogram will help us visualize the variable. 
+
+```{r}
+cafo_data %>% 
+  ggplot(aes(x = feclog)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.2, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "log-transformed count", 
+       title = "Fecal Coliform distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+We can see a symmetric distribution with a large spike in the negative region. This is most probably an artifact from the zero-skewed nature of the variable. Prior to log transforming the variable, a constant term was added to replace 0 counts. The histogram looks **symmetric and Gaussian in nature**.  
+
+Let us plot the mean log transformed fecal coliform count at each of the monitoring stations.
+
+```{r}
+# Create a copy of the data and round coordinates to standardize locations
+clean_data <- cafo_data
+clean_data$longitude <- round(clean_data$longitude, 3)
+clean_data$latitude <- round(clean_data$latitude, 3)
+
+# Group by the rounded coordinates to get an accurate count per site
+location_counts <- clean_data %>%
+  group_by(longitude, latitude) %>%
+  summarize(mean_feclog = mean(feclog, na.rm = TRUE), .groups = 'drop')
+
+# Convert to sf spatial object and match map projection
+points_sf <- st_as_sf(location_counts, coords = c("longitude", "latitude"), crs = 4326)
+points_sf <- st_transform(points_sf, st_crs(cape_fear_basin))
+```
+
+```{r}
+# Sort so larger bubbles are drawn first (background) and smaller ones on top
+points_sf <- points_sf[order(-points_sf$mean_feclog), ]
+
+plot2 <- ggplot() + 
+  # Background NC outline (entire state)
+  geom_polygon(data = nc_state, aes(x = long, y = lat, group = group), 
+               fill = "#f5f5f5", color = "#dcdcdc", linewidth = 0.5) +
+  
+  # Main Layer: HUC8 subbasins with categorical colors
+  geom_sf(data = cape_fear_basin, aes(fill = name), 
+          color = "white", linewidth = 0.6, alpha = 0.85) +
+  
+  # Thick outer boundary line to frame the entire combined basin
+  geom_sf(data = st_union(cape_fear_basin), fill = NA, color = "#222222", 
+          linewidth = 1.3) +
+  
+  # River paths inside the basin
+  geom_sf(data = cape_fear_rivers, color = "#4a5568", linewidth = 0.45) +  
+  
+  # Main Points Layer: Bubble size now represents the mean_feclog value
+  geom_sf(data = points_sf, aes(size = mean_feclog), 
+          color = "#ffffff", fill = "#001f3f", shape = 21, stroke = 0.6, 
+          alpha = 0.9) +
+  
+  # Control the bubble size range
+  scale_size_continuous(range = c(1.5, 7.5), name = "Mean Log Fecal") +
+  
+  # Categorical colors for the 7 HUC8 subbasins
+  scale_fill_brewer(palette = "Set3") +
+  
+  # Canvas layout (no hard limits = shows full state)
+  coord_sf(expand = FALSE) +
+  theme_minimal() + 
+  labs(title = "Cape Fear River Basin - Water Quality Analysis",
+    subtitle = "Bubble size represents the mean feclog concentration per site",
+    fill = "Subbasin Name") +
+  theme(legend.position = "right", 
+        legend.title = element_text(face = "bold"),
+        plot.title = element_text(face = "bold", size = 14),
+        panel.background = element_rect(fill = "#edf4f9", color = NA))
+plot2
+```
+
+Looks like on average, the fecal coliform count is higher in the upper regions of the river basin. Southeast region, where we have the highest concentration of monitoring stations and data, has the lowest mean fecal coliform count.
+
+### Nitrite/Nitrate Concentration
+Here EDA is performed to look at trends in Nitrite/Nitrate Concentration. Let us look at numerical statistics. 
+
+```{r}
+summary(cafo_data[, c("no2no3mgl")])
+```
+
+The Nitrite/ Nitrate concentration variable has large variability with few missing observations. The mean and median vary significantly suggesting a non-symmetric distribution. Let us plot the histogram for the variable. 
+
+```{r}
+cafo_data %>% drop_na(no2no3mgl) %>% 
+  ggplot(aes(x = no2no3mgl)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.2, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Nitrite/Nitrate (mg/l)", 
+       title = "Raw Nitrite/Nitrate distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+We can see a big spike in the histogram at 0 mg/l concentration. Ecological data in general tend to be left-censored. Let us take estimate the percentage of 0 values in our variable.
+
+```{r}
+print(paste("Percentage of 0's in Nitrite/ Nitrate variable is ", 
+      round(mean(cafo_data$no2no3mgl == 0, na.rm = TRUE) * 100, 2)))
+```
+
+The large percentage of 0's in the variable could be due to the minimum detection limit of the measurement equipment. Let us plot the data excluding the 0 concentration values. 
+
+```{r}
+cafo_data %>% drop_na(no2no3mgl) %>% filter( no2no3mgl > 0) %>% 
+  ggplot(aes(x = no2no3mgl)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.2, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Nitrite/Nitrate (mg/l)", 
+       title = "Zero Excluded Nitrite/Nitrate distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+After excluding the zero values, data looks like an exponentially distributed random variable. Let us perform a log transformation and then look at the trends. Because our variable has a large portion of 0 values, we will need to impute these prior to log transformation. **We will impute the 0 values using 0.5 * minimum detection limit of the instrument.**
+
+```{r}
+cafo_data %>% drop_na(no2no3mgl) %>% 
+  filter(no2no3mgl != 0)  %>%
+  summarise(minimum = min (no2no3mgl))
+```
+
+*The limit detection limit (LOD) for Nitrite/Nitrate concentration in this dataset is 0.02 mg/l*. A further analysis was performed with data from other years, and it was determined that the *LOD for this instrument is 0.01 mg/l*. As a result, **all observations with 0 concentration were imputed with 0.005 mg/l prior to log transformation**. Let us summarize the log-transformed Nitrie/Nitrate concentration variable.
+
+```{r}
+summary(cafo_data[, c("nitlog")])
+```
+
+We can see the log-transformed Nitrite/Nitrate concentration is spread out with the mean and median being reasonably close. This suggests a symmetric distribution. Let us plot the histogram to visualize this.
+
+```{r}
+cafo_data %>% drop_na(nitlog) %>%
+  ggplot(aes(x = nitlog)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.1, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "log-transformed Nitrite/Nitrate", 
+       title = "log-transformed Nitrite/Nitrate concentration Histogram",
+       y = "density") + 
+  theme_bw() 
+```
+
+We can see a plot similar to the log-transformed fecal coliform count. The spike below -2 is most likely a result of zero-skewed data. The histogram looks **symmetric and Gaussian in nature**.  
+
+Now, let us plot the mean Nitrite/Nitrate concentration at each of the monitoring stations.
+
+```{r}
+# Create a copy of the data and round coordinates to standardize locations
+clean_data <- cafo_data
+clean_data$longitude <- round(clean_data$longitude, 3)
+clean_data$latitude <- round(clean_data$latitude, 3)
+
+# Group by the rounded coordinates to get an accurate count per site
+location_counts <- clean_data %>%
+  group_by(longitude, latitude) %>%
+  summarize(mean_no2no3mgl = mean(no2no3mgl, na.rm = TRUE), .groups = 'drop')
+
+# Convert to sf spatial object and match map projection
+points_sf <- st_as_sf(location_counts, coords = c("longitude", "latitude"), crs = 4326)
+points_sf <- st_transform(points_sf, st_crs(cape_fear_basin))
+```
+
+```{r}
+# Sort so larger bubbles are drawn first (background) and smaller ones on top
+points_sf <- points_sf[order(-points_sf$mean_no2no3mgl), ]
+
+plot3 <- ggplot() + 
+  # Background NC outline (entire state)
+  geom_polygon(data = nc_state, aes(x = long, y = lat, group = group), 
+               fill = "#f5f5f5", color = "#dcdcdc", linewidth = 0.5) +
+  
+  # Main Layer: HUC8 subbasins with categorical colors
+  geom_sf(data = cape_fear_basin, aes(fill = name), 
+          color = "white", linewidth = 0.6, alpha = 0.85) +
+  
+  # Thick outer boundary line to frame the entire combined basin
+  geom_sf(data = st_union(cape_fear_basin), fill = NA, color = "#222222", 
+          linewidth = 1.3) +
+  
+  # River paths inside the basin
+  geom_sf(data = cape_fear_rivers, color = "#4a5568", linewidth = 0.45) +  
+  
+  # Main Points Layer: Bubble size now represents the mean_feclog value
+  geom_sf(data = points_sf, aes(size = mean_no2no3mgl), 
+          color = "#ffffff", fill = "#001f3f", shape = 21, stroke = 0.6, 
+          alpha = 0.9) +
+  
+  # Control the bubble size range
+  scale_size_continuous(range = c(1.5, 7.5), 
+                        name = "Mean no2no3mgl Conc.") +
+  
+  # Categorical colors for the 7 HUC8 subbasins
+  scale_fill_brewer(palette = "Set3") +
+  
+  # Canvas layout (no hard limits = shows full state)
+  coord_sf(expand = FALSE) +
+  theme_minimal() + 
+  labs(title = "Cape Fear River Basin - Water Quality Analysis",
+       subtitle = "Bubble size represents the mean no2no3mgl concentration per site",
+    fill = "Subbasin Name") +
+  theme(legend.position = "right", 
+        legend.title = element_text(face = "bold"),
+        plot.title = element_text(face = "bold", size = 14),
+        panel.background = element_rect(fill = "#edf4f9", color = NA))
+plot3
+```
+
+We can see that upper region of the river basin has the highest mean concentration while the southeast region has the lowest mean concentration. The trends are similar to log transformed fecal coliform count.
+
+### Phosphorus Concentration
+Here EDA is performed to look at trends in Phosphorus Concentration. Let us look at numerical statistics. 
+
+```{r}
+summary(cafo_data[, c("phosphorusmgl")])
+```
+
+The trends look similar to raw Nitrite/Nitrate concentrations. We have a large variability in data with differing mean and median. Let us plot the histogram for the variable. 
+
+```{r}
+cafo_data %>% drop_na(phosphorusmgl) %>% 
+  ggplot(aes(x = phosphorusmgl)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.2, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Phosphorus (mg/l)", 
+       title = "Raw Phosphorus distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+We can see a big spike in the histogram at 0 mg/l concentration suggesting left-censored data. Let us take estimate the percentage of 0 values.
+
+```{r}
+print(paste("Percentage of 0's in Phosphorus variable is ", 
+      round(mean(cafo_data$phosphorusmgl == 0, na.rm = TRUE) * 100, 2)))
+```
+
+The large percentage of 0's in the variable could be due to the minimum detection limit of the measurement equipment. Let us plot the data excluding the 0 concentration values. 
+
+```{r}
+cafo_data %>% drop_na(phosphorusmgl) %>% filter(phosphorusmgl > 0) %>% 
+  ggplot(aes(x = phosphorusmgl)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.1, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Phosphorus (mg/l)", 
+       title = "Zero Excluded Phosphorus distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+After excluding the zero values, data looks like an exponentially distributed random variable. Let us perform a log transformation and then look at the trends. Because our variable has a large portion of 0 values, we will need to impute these prior to log transformation.**We will impute the 0 values using 0.5 * minimum detection limit of the instrument.**
+
+```{r}
+cafo_data %>% drop_na(phosphorusmgl) %>% 
+  filter(phosphorusmgl != 0)  %>%
+  summarise(minimum = min (phosphorusmgl))
+```
+
+*The limit detection limit (LOD) for Phosphorus concentration in this dataset is 0.01 mg/l*. As a result, **all observations with 0 concentration were imputed with 0.005 mg/l prior to log transformation**. Let us summarize the log-transformed Phosphorus concentration variable.
+
+```{r}
+summary(cafo_data[, c("phoslog")])
+```
+
+We can see that the log-transformed Phosphorus concentration has a good spread. The mean and median are reasonably close suggesting a symmetric distribution of data. Let us plot the histogram.
+
+```{r}
+cafo_data %>% drop_na(phoslog) %>%
+  ggplot(aes(x = phoslog)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.1, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "log-transformed Phosphorus", 
+       title = "log-transformed Phosphorus concentration Histogram",
+       y = "density") + 
+  theme_bw() 
+```
+
+We can see a plot similar to log-transformed fecal coliform count and Nitrite/Nitrate concentration. The spike below -2 is most likely a result of zero-skewed data. Overall the histogram looks **symmetric and Gaussian in nature**.  
+
+Now, let us plot the mean Phosphorus concentration at each of the monitoring stations.
+
+```{r}
+# Create a copy of the data and round coordinates to standardize locations
+clean_data <- cafo_data
+clean_data$longitude <- round(clean_data$longitude, 3)
+clean_data$latitude <- round(clean_data$latitude, 3)
+
+# Group by the rounded coordinates to get an accurate count per site
+location_counts <- clean_data %>%
+  group_by(longitude, latitude) %>%
+  summarize(mean_phosphorusmgl = mean(phosphorusmgl, na.rm = TRUE), .groups = 'drop')
+
+# Convert to sf spatial object and match map projection
+points_sf <- st_as_sf(location_counts, coords = c("longitude", "latitude"), crs = 4326)
+points_sf <- st_transform(points_sf, st_crs(cape_fear_basin))
+```
+
+```{r}
+# Sort so larger bubbles are drawn first (background) and smaller ones on top
+points_sf <- points_sf[order(-points_sf$mean_phosphorusmgl), ]
+
+plot4 <- ggplot() + 
+  # Background NC outline (entire state)
+  geom_polygon(data = nc_state, aes(x = long, y = lat, group = group), 
+               fill = "#f5f5f5", color = "#dcdcdc", linewidth = 0.5) +
+  
+  # Main Layer: HUC8 subbasins with categorical colors
+  geom_sf(data = cape_fear_basin, aes(fill = name), 
+          color = "white", linewidth = 0.6, alpha = 0.85) +
+  
+  # Thick outer boundary line to frame the entire combined basin
+  geom_sf(data = st_union(cape_fear_basin), fill = NA, color = "#222222", 
+          linewidth = 1.3) +
+  
+  # River paths inside the basin
+  geom_sf(data = cape_fear_rivers, color = "#4a5568", linewidth = 0.45) +  
+  
+  # Main Points Layer: Bubble size now represents the mean_feclog value
+  geom_sf(data = points_sf, aes(size = mean_phosphorusmgl), 
+          color = "#ffffff", fill = "#001f3f", shape = 21, stroke = 0.6, 
+          alpha = 0.9) +
+  
+  # Control the bubble size range
+  scale_size_continuous(range = c(1.5, 7.5), 
+                        name = "Mean Phosphorus Conc.") +
+  
+  # Categorical colors for the 7 HUC8 subbasins
+  scale_fill_brewer(palette = "Set3") +
+  
+  # Canvas layout (no hard limits = shows full state)
+  coord_sf(expand = FALSE) +
+  theme_minimal() + 
+  labs(title = "Cape Fear River Basin - Water Quality Analysis",
+       subtitle = "Bubble size represents the mean phosphorusmgl concentration per site",
+       fill = "Subbasin Name") +
+  theme(legend.position = "right", 
+        legend.title = element_text(face = "bold"),
+        plot.title = element_text(face = "bold", size = 14),
+        panel.background = element_rect(fill = "#edf4f9", color = NA))
+plot4
+```
+
+We can see that southwest region of the river basin has the highest mean concentration while the southeast and upper regions have the lowest means. This is quite opposite of what we saw for log transformed fecal coliform count and Nitrite/Nitrate concentrations.
+
+
+### Response Variables EDA Conclusion
+Based on the EDA for response variables, **we will use log transformed data for all three variables**.
+
+
+## Predictor Variables EDA
+Here the EDA for predictor variables is performed. We will look at trends for these variables at the HUC6 level and use the same trends for all other HUC levels. 
+
+### Poultry CAFO variables
+We will look at some poultry CAFO parameters first. Let us look at the summary statistics for these variables.
+
+```{r}
+summary(cafo_data[, c("upstream_poultry_cafo_density", 
+                      "weighted_poultry_cafo_load")])
+```
+
+Let us plot these continuous variables here. 
+
+```{r}
+cafo_data %>% 
+  ggplot(aes(x = upstream_poultry_cafo_density)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.01, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Upstream Poultry CAFO Density", 
+       title = "Upstream Poultry CAFO Density distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+Looks like the CAFO density variable is multi-modal in nature.
+
+```{r}
+cafo_data %>% 
+  ggplot(aes(x = weighted_poultry_cafo_load)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.001, fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) + 
+  labs(x = "Upstream Poultry CAFO Density", 
+       title = "Upstream Weighted Poultry CAFO load distribution",
+       y = "density") + 
+  theme_bw() 
+```
+
+The trends for weighted CAFO load are similar to CAFO density with multiple peaks in the distribution. This kind of behavior is expected in real-world data. **The distributions suggest that we adopt some generalized additive models rather than linear models.** 
+
+
+## Confounding variables EDA
+Here the trends in confounding variables are determined. Let us look at numerical statistics for the confounding variables. 
+
+```{r}
+summary(cafo_data[, c("upstream_swine_cafo_density", 
+                      "upstream_other_cafo_density",
+                      "upstream_wastewater_density",
+                      "upstream_other_npdes_density",
+                      "upstream_landfill_density",
+                      "weighted_swine_cafo_load",
+                      "weighted_other_cafo_load",
+                      "weighted_wastewater_load",
+                      "weighted_other_npdes_load",
+                      "weighted_landfill_load")])
+```
+
+
+## Correlations
+Let us look at relationships between response and predictor variables.
+
+```{r}
+cafo_data %>% ggplot(aes(x = feclog, y = upstream_poultry_cafo_count)) + 
+  geom_point()
+```
+
+
+
+
+
+
+

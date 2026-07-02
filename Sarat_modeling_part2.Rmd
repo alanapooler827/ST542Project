@@ -1,0 +1,194 @@
+---
+title: "CAFO_Modeling: Sarat"
+author: "Sarat Bantupalli"
+date: "2026-07-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,
+                      warning = FALSE, message = FALSE)
+```
+
+# Introduction
+This is part 2 of working with the Concentrated Animal Feeding Operations (CAFO's) in the Cape Fear River Basin. Please see the EDA report in Part 1 which identifies key trends in data.  
+
+In short, we have hierarchical data with temporally varying observations. Based on our EDA, all response variables have been log transformed. Key predictor variables in our data include count of upstream CAFO's at a particular monitoring station, upstream CAFO density, and weighted CAFO load (variable that combines distance and count variables). The first variable is a count type variable while the last two are continuous variables.
+
+## Modeling Framework
+A Generalized Additive Mixed Model (GAMM) will be fit in this project. A GAMM can account for variability in data due to location, time, and hierarchical structures. This makes it an ideal choice here. 
+
+Statistical modeling in this project will have the following flow:  
+
+ + fit separate models for response variables  
+ + implement a GAMM to HUC6 level data: this is a top-down structural approach and will give a good base framework. The output results from this model will be considered as baseline  
+ + sequentially implement a GAMM to other HUC levels   
+ + compare and infer model outputs at different HUC levels  
+
+## Required R Packages
+
+```{r}
+library(tidyverse) # for data manipulation, plotting
+library(lubridate) # for working with datetime objects
+library(mgcv) # for fitting a GAMM model
+```
+
+# Data
+Here the raw data is read, and then transformed for further analysis.  
+
+The `read_csv()` function from `tidyverse` package is used to read the raw data. The columns are then re-arranged to have variables of interest at the beginning of the data frame. 
+
+```{r}
+# read the data and re-arrange columns
+cafo_data <- read_csv("cafo-wq-data-rev.csv") %>% # read the csv file
+  # re-arrange the order of columns
+  relocate(date, year, station_id, latitude, longitude, 
+           feclog, no2no3mgl, nitlog, phosphorusmgl, phoslog, fecpos,
+           exceed_fec, exceed_nit, exceed_phos, stationcategory) %>% 
+  # transform date from as.character object to a datetime object 
+  mutate(date = mdy(date), 
+         station_id = as.factor(station_id),
+         stationcategory = as.factor(stationcategory),
+         huc6id = as.factor(substr(as.character(huc8id), 1, 6)),
+         huc8id = as.factor(huc8id),
+         huc10id = as.factor(huc10id),
+         huc12id = as.factor(huc12id)) %>% 
+  mutate(year = decimal_date(date))
+cafo_data # print first few observations of the data frame
+```
+
+# HUC6 Model Fit for feclog
+Here a GAMM model is fit with the following choices:  
+
+ + response variable: `feclog`  
+ + predictor variables: upstream_poultry_cafo_density, weighted_poultry_cafo_load (combines count and distance variables)  
+ + confounding variables: upstream_other_cafo_density, upstream_wastewater_density, upstream_other_npdes_density, upstream_landfill_density, weighted_swine_cafo_load, weighted_other_cafo_load, weighted_wastewater_load, weighted_other_npdes_load, weighted_landfill_load  
+
+Mathematically, our GAMM model can be represented as following: 
+
+$$
+y_{it} = \beta_0 + \sum_{k=1}^{2}\beta_k . X_{k,it} + \sum_{l=1}^{2}\alpha_l . Z_{l,i} + \sum_{j=1}^{j}\gamma_j X_{j,it} + f_{global}(t) + f_{category(i)}(t) + b_i + \epsilon_{it}
+$$
+
+where $y_{it}$ is the log-transformed feclog for monitoring site i at time t.  
+
+Here are the fixed effects in this model:  
+
+ + $\beta_0$: baseline mean  
+ + $\beta_k$ and $X_{k,it}$: fixed effects for predictor variables  
+ + $\alpha_l$ and $Z_{l,i}$: fixed effects for the dummy indicator variable representing `stationcategory`  
+ + $\gamma_j$ and $X_{j,it}$: fixed effects for confounding variables  
+
+The additive components in the model include the following:  
+
+ + $f_{global}(t)$: shared variation in response variable over the years across the entire dataset  
+ + $f_{category(i)}(t)$: variation of response variable over the years based on `stationcategory`  
+
+The random effect terms in the model include:  
+
+ + $b_i$: random intercept for individual monitoring sites  
+ + $\epsilon_{it}$: residual random error  
+
+The **Fast Restricted Maximum Likelihood (fREML)** function was used as the numerical approach for model fit.  
+
+The following assumptions were made in the model fit:  
+
+ + Gaussian distribution for random effects and residual terms  
+ + No interaction terms  
+
+A note on degrees of freedom: Tracking degrees of freedom in a GAMM is different from traditional linear regression models. In a linear model, each variable costs exactly 1 degree of freedom. In a GAMM, because additive terms can bend and flex, they use fractional (continuous) degrees of freedom, known as Effective Degrees of Freedom (EDF). We will need to look at the output to figure this out.  
+
+
+Here is the first model fit at HUC6 level for our dataset.
+
+```{r}
+model1_huc6 <- bam(
+  feclog ~ stationcategory + upstream_poultry_cafo_density + 
+    weighted_poultry_cafo_load +
+    upstream_other_cafo_density + 
+    upstream_wastewater_density + 
+    upstream_other_npdes_density + 
+    upstream_landfill_density + 
+    weighted_swine_cafo_load + 
+    weighted_other_cafo_load + 
+    weighted_wastewater_load + 
+    weighted_other_npdes_load + 
+    weighted_landfill_load + 
+    s(year, bs = "cr", k = 10) + # s- stands for smooth term, 
+    s(year, by = stationcategory, bs = "cr", k = 5) + # cr= cubic regression
+    s(station_id, bs = "re"), # Captures site-to-site variance, re= random effect
+  data = cafo_data,
+  method = "fREML", # fast restricted maximum likelihood
+  family = gaussian())
+```
+
+Let us look at the model summary output. 
+
+```{r}
+summary(model1_huc6)
+```
+
+We can see that not all predictor variables are significant in the model fit based on the p-values. The adjusted $R^2$ for the model fit is 0.404 while the fREML score is 17248. Let us plot the additive/ smooth terms in the model. 
+
+```{r}
+library(gratia)
+draw(model1_huc6)
+```
+
+Looks like the smooth terms plot varies based on `stationcategory`. Let us now plot the residuals.
+
+```{r}
+# Check if your splines (k) are flexible enough
+gam.check(model1_huc6)
+```
+
+From the table output above, we can see the k-index and p-values are very small for our additive terms. This suggests we have a rigid spline and need to increase `k` value in the model fit. But this could also suggest that we need to might have residual temporal autocorrelation in our data.  
+
+The Q-Q plot is close to normal but the residual plot does not look random at all. The perfectly straight, sharp diagonal line running along the bottom-left edge suggests that a large portion of the data has the same minimum value. This structure violates the `gaussian()` assumption. Lett us try the family of models that can handle left-censored natively.
+
+## Model 2
+Here the left-censored data is handled by using the `Tweedie family` distribution with a log-link. he log-link handles the exponential scaling internally, while the Tweedie distribution models the cluster of zeros as a distinct mass alongside the continuous positive values
+
+```{r}
+model2_huc6 <- bam(
+  fecalcoliformcol100ml ~ stationcategory + upstream_poultry_cafo_density + 
+    weighted_poultry_cafo_load +
+    upstream_other_cafo_density + 
+    upstream_wastewater_density + 
+    upstream_other_npdes_density + 
+    upstream_landfill_density + 
+    weighted_swine_cafo_load + 
+    weighted_other_cafo_load + 
+    weighted_wastewater_load + 
+    weighted_other_npdes_load + 
+    weighted_landfill_load + 
+    s(year, bs = "cr", k = 10) + # s- stands for smooth term, 
+    s(year, by = stationcategory, bs = "cr", k = 5) + # cr= cubic regression
+    s(station_id, bs = "re"), # Captures site-to-site variance, re= random effect
+  data = cafo_data,
+  method = "fREML", # fast restricted maximum likelihood
+  family = tw(link = "log"))
+
+```
+
+Let us look at the model summary output. 
+
+```{r}
+summary(model2_huc6)
+```
+
+We can see that not all predictor variables are significant in the model fit based on the p-values. The adjusted $R^2$ for the model fit is 0.404 while the fREML score is 17248. Let us plot the additive/ smooth terms in the model. 
+
+```{r}
+draw(model2_huc6)
+```
+
+Looks like the smooth terms plot varies based on `stationcategory`. Let us now plot the residuals.
+
+```{r}
+# Check if your splines (k) are flexible enough
+gam.check(model2_huc6)
+```
+
+
+
