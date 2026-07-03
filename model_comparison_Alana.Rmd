@@ -43,8 +43,7 @@ Running stepwise selection on all predictors and all covariates at the same time
 
 This can be reused for model selection across all spatial scales and response variables by changing the function inputs.
 
-```{r}
-cafo_model_selection <- function(data, response, predictors, covariates, random_effects) {
+cafo_model_selection <- function(data, response, predictors, confounding_vars) {
   
   full_models <- list()
   step_results <- list()
@@ -53,7 +52,7 @@ cafo_model_selection <- function(data, response, predictors, covariates, random_
   for (predictor in predictors) {
     
     fixed_effects <- paste(
-      c(predictor, covariates),
+      c(predictor, confounding_vars),
       collapse = ' + '
     )
     
@@ -62,7 +61,7 @@ cafo_model_selection <- function(data, response, predictors, covariates, random_
         response,
         '~',
         fixed_effects,
-        random_effects
+        '+ (1 | huc8id / station_id)'
       )
     )
     
@@ -120,7 +119,7 @@ Scale predictor variables in a way that will make model coefficients more interp
 
 Interpretation of coefficients after scaling: expected change in the response for each X unit increase in {predictor variable}
 
-Covariates are currently not being scaled as scaling them had no effect on the models
+Confounders are currently not being scaled as scaling them had no effect on the models
 
 We also need to remove missing values from predictors that are being tested or else we will get an error when running the stepwise selection
 
@@ -149,8 +148,8 @@ all_cafo_predictors <- c(
   'huc12_nearest_upstream_cafo_dist_scaled'
 )
 
-# covariates for backward elimination
-covariates <- c(
+# confounders for backward elimination
+confounders <- c(
   'huc12_pop_density',
   'huc12_pct_cropland',
   'huc12_upstream_wastewater_count',
@@ -161,13 +160,9 @@ covariates <- c(
 )
 ```
 
-Note that huc12id is not included in the random effects in the following models because there is a high degree of confounding between the huc12's and stations.
-
-huc10id is also not included in the random effects for the following models because including it resulted in a singular fit warning because the random effect was \~0.
+Note that huc10id is not included in the random effects in the following models because there is a high degree of confounding between the huc10's and stations.
 
 ### Nitrite/nitrate concentration
-
-Including huc10id in the random effects resulted in a singular fit warning because the random effect was \~0 so it was excluded.
 
 Best predictor: huc12_nearest_upstream_cafo_dist_scaled
 
@@ -175,14 +170,11 @@ Best predictor: huc12_nearest_upstream_cafo_dist_scaled
 nitlog_results <- cafo_model_selection(huc12_df,
                                        response = 'nitlog',
                                        all_cafo_predictors,
-                                       covariates,
-                                       random_effects = '+ (1 | huc8id / station_id)')
+                                       confounders)
 nitlog_results
 ```
 
-Best formula: nitlog \~ nearest_upstream_cafo_dist_scaled + stationcategory + month + (1 \| huc8id/station_id)
-
-AIC = 20485.3
+Best formula: nitlog \~ huc12_nearest_upstream_cafo_dist_scaled + stationcategory + month + (1 \| huc8id/station_id)
 
 ```{r}
 summary(nitlog_results$best_model)
@@ -196,15 +188,14 @@ Best predictor = huc12_nearest_upstream_cafo_dist_scaled
 feclog_results <- cafo_model_selection(huc12_df,
                                        response = 'feclog',
                                        all_cafo_predictors,
-                                       covariates,
-                                       random_effects =  '+ (1 | huc8id / station_id)')
+                                       confounders)
 feclog_results
 ```
 
 Best model
 
-formula: feclog \~ nearest_upstream_cafo_dist_scaled + huc12_upstream_other_npdes_count +\
-stationcategory + month + (1 \| huc8id/station_id) AIC = 23061.5
+formula: feclog \~ huc12_nearest_upstream_cafo_dist_scaled + huc12_upstream_other_npdes_count +\
+stationcategory + month + (1 \| huc8id/station_id)
 
 ```{r}
 summary(feclog_results$best_model)
@@ -220,8 +211,7 @@ best predictor = huc12_nearest_upstream_cafo_dist_scaled
 phoslog_results <- cafo_model_selection(huc12_df,
                                        response = 'phoslog',
                                        all_cafo_predictors,
-                                       covariates,
-                                       random_effects = '+ (1 | huc8id / station_id)')
+                                       confounders)
 phoslog_results
 ```
 
@@ -235,6 +225,111 @@ summary(phoslog_results$best_model)
 ```
 
 huc12_nearest_upstream_cafo_dist_scaled was the best predictor for all of the models tested above.
+
+## Stepwise Selection: Separate CAFO Metrics Models
+
+Prepare predictors and confounding variables
+
+Can't include distance variables for other and swine CAFO's because NA values will be dropped and only one unique station_id will be left
+
+```{r}
+huc12_poultry_df <- df |>
+  drop_na(huc12_nearest_upstream_poultry_c)
+  
+huc12_poultry_df <- huc12_poultry_df |>
+  mutate(
+    huc12_upstream_p_cafo_density_scaled = huc12_upstream_poultry_cafo_dens / 0.1,
+    huc12_upstream_p_cafo_count_scaled = huc12_upstream_poultry_cafo_coun / 10,
+    huc12_weighted_p_cafo_load_scaled = huc12_weighted_poultry_cafo_load / 10,
+    huc12_nearest_p_upstream_cafo_dist_scaled = huc12_nearest_upstream_poultry_c / 1000,
+    
+    # other cafo confounding vars
+    huc12_upstream_other_cafo_density_scaled = huc12_upstream_other_cafo_densit / 0.1,
+    huc12_upstream_other_cafo_count_scaled = huc12_upstream_other_cafo_count / 10,
+    
+    # swine cafo confounding vars
+    huc12_upstream_s_cafo_density_scaled = huc12_upstream_swine_cafo_densit / 0.1,
+    huc12_upstream_s_cafo_count_scaled = huc12_upstream_swine_cafo_count / 10
+    
+  )
+```
+
+```{r}
+# scaled cafo predictors to test one at a time
+p_cafo_predictors <- c(
+  'huc12_upstream_p_cafo_density_scaled',
+  'huc12_upstream_p_cafo_count_scaled',
+  'huc12_weighted_p_cafo_load_scaled',
+  'huc12_nearest_p_upstream_cafo_dist_scaled'
+)
+
+# confounders for backward elimination
+p_confounders <- c(
+  'huc12_upstream_other_cafo_density_scaled',
+  'huc12_upstream_other_cafo_count_scaled',
+  'huc12_upstream_s_cafo_density_scaled',
+  'huc12_upstream_s_cafo_count_scaled',
+  'huc12_pop_density',
+  'huc12_pct_cropland',
+  'huc12_upstream_wastewater_count',
+  'huc12_upstream_landfill_count',
+  'huc12_upstream_other_npdes_count',
+  'stationcategory',
+  'month'
+)
+```
+
+### Nitrite/nitrate Concentration
+
+-   Need to figure out where the 'simpleWarning: Some predictor variables are on very different scales: consider rescaling.' warnings are coming from and scale those variables appropriately
+
+```{r}
+nitlog_p_results <- cafo_model_selection(huc12_poultry_df,
+                                       response = 'nitlog',
+                                       predictors = p_cafo_predictors,
+                                       p_confounders)
+nitlog_p_results
+```
+
+Best formula: nitlog \~ huc12_nearest_p_upstream_cafo_dist_scaled + month + (1 \| station_id:huc8id)
+
+```{r}
+summary(nitlog_p_results$best_model)
+```
+
+### Fecal Coliform Counts
+
+```{r}
+feclog_p_results <- cafo_model_selection(huc12_poultry_df,
+                                       response = 'feclog',
+                                       predictors = p_cafo_predictors,
+                                       p_confounders)
+feclog_p_results
+```
+
+Best formula: feclog \~ huc12_upstream_p_cafo_density_scaled + huc12_pct_cropland +\
+huc12_upstream_landfill_count + huc12_upstream_other_npdes_count + month + (1 \| huc8id/station_id)
+
+```{r}
+summary(feclog_p_results$best_model)
+```
+
+### Phosphorous Concentration
+
+```{r}
+phoslog_p_results <- cafo_model_selection(huc12_poultry_df,
+                                          response = 'phoslog',
+                                          predictors = p_cafo_predictors,
+                                          p_confounders)
+phoslog_p_results
+```
+
+Best formula: phoslog \~ huc12_upstream_p_cafo_density_scaled + huc12_upstream_s_cafo_density_scaled +\
+huc12_upstream_s_cafo_count_scaled + huc12_pct_cropland + stationcategory + month + (1 \| station_id:huc8id)
+
+```{r}
+summary(phoslog_p_results$best_model)
+```
 
 ## To-do:
 
