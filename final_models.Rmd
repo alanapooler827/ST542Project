@@ -9,6 +9,8 @@ Import libraries
 ```{r warning=FALSE}
 library(lme4)
 library(tidyverse)
+library(performance)
+options(scipen = 999)
 ```
 
 Read in and clean data
@@ -40,7 +42,7 @@ raw_data <- raw_data |>
     month = as.factor(month)
   )
 
-# scale variables
+# scale CAFO metric variables
 huc12_df <- raw_data |>
   mutate(
     # all CAFO metric
@@ -48,6 +50,10 @@ huc12_df <- raw_data |>
     
     # poultry CAFO metric
     huc12_nearest_p_upstream_cafo_dist_scaled = huc12_nearest_upstream_poultry_c / 1000,
+    
+    # swine CAFO metrics
+    huc12_upstream_s_cafo_density_scaled = huc12_upstream_swine_cafo_densit / 0.1,
+    huc12_upstream_s_cafo_count_scaled = huc12_upstream_swine_cafo_count / 10
   )
 ```
 
@@ -58,17 +64,18 @@ Log Nitrite/Nitrate model
 nitlog_lmer <- lmer(nitlog ~ huc12_nearest_upstream_cafo_dist_scaled
                     + stationcategory
                     + month
-                    + (1 | huc8id/station_id),
+                    + (1 | huc8id / station_id),
                     data = huc12_df,
                     REML = TRUE)
 
 summary(nitlog_lmer)
+r2(nitlog_lmer)
 ```
 
 Log Fecal Coliform Counts
 ```{r}
 feclog_lmer <- lmer(feclog ~ huc12_nearest_upstream_cafo_dist_scaled
-                    + huc12_upstream_other_npdes_count
+                    + huc12_upstream_other_npdes_densi
                     + stationcategory
                     + month
                     + (1 | huc8id/station_id),
@@ -76,12 +83,15 @@ feclog_lmer <- lmer(feclog ~ huc12_nearest_upstream_cafo_dist_scaled
                     REML = TRUE)
 
 summary(feclog_lmer)
+r2(feclog_lmer)
 ```
+
 
 Log Phosphorous concentration
 ```{r}
 phoslog_lmer <- lmer(phoslog ~ huc12_nearest_upstream_cafo_dist_scaled
-                    + huc12_upstream_other_npdes_count
+                    + huc12_pop_density
+                    + huc12_upstream_wastewater_densit
                     + stationcategory
                     + month
                     + (1 | huc8id/station_id),
@@ -89,6 +99,7 @@ phoslog_lmer <- lmer(phoslog ~ huc12_nearest_upstream_cafo_dist_scaled
                     REML = TRUE)
 
 summary(phoslog_lmer)
+r2(phoslog_lmer)
 ```
 
 ## LMER Models: Poultry Metrics
@@ -102,32 +113,42 @@ nitlog_lmer_p <- lmer(nitlog ~ huc12_nearest_p_upstream_cafo_dist_scaled
                       REML = TRUE)
 
 summary(nitlog_lmer_p)
+r2(nitlog_lmer_p)
 ```
 
 Log Fecal Coliform Counts
+
+feclog ~ huc12_nearest_p_upstream_cafo_dist_scaled + huc12_pct_cropland +  
+    huc12_weighted_landfill_load + huc12_upstream_other_npdes_densi +      month + (1 | huc8id/station_id)
 ```{r}
 feclog_lmer_p <- lmer(feclog ~ huc12_nearest_p_upstream_cafo_dist_scaled
                       + huc12_pct_cropland
-                      + huc12_upstream_landfill_count
-                      + huc12_upstream_other_npdes_count
+                      + huc12_weighted_landfill_load
+                      + huc12_upstream_other_npdes_densi
                       + month
                       + (1 | huc8id/station_id),
                       data = huc12_df,
                       REML = TRUE)
 
 summary(feclog_lmer_p)
+r2(feclog_lmer_p)
 ```
 
 
 Log Phosphorous concentration
 ```{r}
 phoslog_lmer_p <- lmer(phoslog ~ huc12_nearest_p_upstream_cafo_dist_scaled
-                      + huc12_pct_cropland
-                      + stationcategory
-                      + month
-                      + (1 | huc8id/station_id),
-                      data = huc12_df,
-                      REML = TRUE)
+                       + huc12_upstream_s_cafo_density_scaled
+                       + huc12_upstream_s_cafo_count_scaled
+                       + huc12_pop_density
+                       + huc12_pct_cropland
+                       + huc12_upstream_wastewater_densit
+                       + stationcategory
+                       + month
+                       + (1 | huc8id/station_id),
+                       data = huc12_df,
+                       REML = TRUE)
 
 summary(phoslog_lmer_p)
+r2(phoslog_lmer_p)
 ```
