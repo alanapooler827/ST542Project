@@ -57,14 +57,10 @@ huc12_df <- raw_data |>
     # poultry CAFO metric
     huc12_nearest_p_upstream_cafo_dist_scaled = huc12_nearest_upstream_poultry_c / 1000,
     
-    # swine CAFO metrics
-    huc12_upstream_s_cafo_density_scaled = huc12_upstream_swine_cafo_densit / 0.1,
-    huc12_upstream_s_cafo_count_scaled = huc12_upstream_swine_cafo_count / 10,
-    
+    # scaling to be more interpretable & so that it is closer in scale to the other variables
     huc12_pop_density_scaled = huc12_pop_density / 100
   )
 ```
-
 
 ## LMER Models: All CAFO Metrics
 
@@ -173,9 +169,9 @@ r2(feclog_lmer_p)
 Log Phosphorous concentration
 ```{r}
 phoslog_lmer_p <- lmer(phoslog ~ huc12_nearest_p_upstream_cafo_dist_scaled
-                       + huc12_upstream_s_cafo_density_scaled
-                       + huc12_upstream_s_cafo_count_scaled
-                       + huc12_pop_density
+                       + huc12_upstream_swine_cafo_densit
+                       + huc12_upstream_swine_cafo_count
+                       + huc12_pop_density_scaled
                        + huc12_pct_cropland
                        + huc12_upstream_wastewater_densit
                        + stationcategory
