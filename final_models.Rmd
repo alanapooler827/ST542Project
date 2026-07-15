@@ -10,6 +10,12 @@ Import libraries
 library(lme4)
 library(tidyverse)
 library(performance)
+
+# for printing and exporting model info
+library(modelsummary)
+library(gt)
+
+# supress scientific notation in outputs
 options(scipen = 999)
 ```
 
@@ -69,6 +75,7 @@ nitlog_lmer <- lmer(nitlog ~ huc12_nearest_upstream_cafo_dist_scaled
                     REML = TRUE)
 
 summary(nitlog_lmer)
+print(paste("AIC:", AIC(nitlog_lmer)))
 r2(nitlog_lmer)
 ```
 
@@ -83,6 +90,7 @@ feclog_lmer <- lmer(feclog ~ huc12_nearest_upstream_cafo_dist_scaled
                     REML = TRUE)
 
 summary(feclog_lmer)
+print(paste("AIC:", AIC(feclog_lmer)))
 r2(feclog_lmer)
 ```
 
@@ -99,8 +107,30 @@ phoslog_lmer <- lmer(phoslog ~ huc12_nearest_upstream_cafo_dist_scaled
                     REML = TRUE)
 
 summary(phoslog_lmer)
+print(paste("AIC:", AIC(phoslog_lmer)))
 r2(phoslog_lmer)
 ```
+
+Print and export model info in a table
+```{r}
+tbl <- modelsummary(
+  list(
+    'Nitrate' = nitlog_lmer,
+    'Fecal Coliform' = feclog_lmer,
+    'Phosphorus' = phoslog_lmer
+  ),
+  statistic = '({std.error})',
+  stars = TRUE,
+  coef_omit = '^(Intercept)|^month',
+  output = 'gt'
+)
+
+tbl
+
+# save table
+gtsave(tbl, 'LMER_all_cafo_results.docx')
+```
+
 
 ## LMER Models: Poultry Metrics
 
@@ -113,6 +143,7 @@ nitlog_lmer_p <- lmer(nitlog ~ huc12_nearest_p_upstream_cafo_dist_scaled
                       REML = TRUE)
 
 summary(nitlog_lmer_p)
+print(paste("AIC:", AIC(nitlog_lmer_p)))
 r2(nitlog_lmer_p)
 ```
 
@@ -131,6 +162,7 @@ feclog_lmer_p <- lmer(feclog ~ huc12_nearest_p_upstream_cafo_dist_scaled
                       REML = TRUE)
 
 summary(feclog_lmer_p)
+print(paste("AIC:", AIC(feclog_lmer_p)))
 r2(feclog_lmer_p)
 ```
 
@@ -150,5 +182,27 @@ phoslog_lmer_p <- lmer(phoslog ~ huc12_nearest_p_upstream_cafo_dist_scaled
                        REML = TRUE)
 
 summary(phoslog_lmer_p)
+print(paste("AIC:", AIC(phoslog_lmer_p)))
 r2(phoslog_lmer_p)
 ```
+
+Print and export model info in one table
+```{r}
+tbl <- modelsummary(
+  list(
+    'Nitrate' = nitlog_lmer_p,
+    'Fecal Coliform' = feclog_lmer_p,
+    'Phosphorus' = phoslog_lmer_p
+  ),
+  statistic = '({std.error})',
+  stars = TRUE,
+  coef_omit = '^(Intercept)|^month',
+  output = 'gt'
+)
+
+tbl
+
+# save table
+gtsave(tbl, 'LMER_poultry_cafo_results.docx')
+```
+

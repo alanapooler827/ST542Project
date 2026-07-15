@@ -43,13 +43,13 @@ huc12_df <- df |>
     # all cafo metrics
     huc12_upstream_cafo_density_scaled = huc12_upstream_cafo_density / 0.1,
     huc12_upstream_cafo_count_scaled = huc12_upstream_cafo_count / 10,
-    huc12_weighted_cafo_load_scaled = huc12_weighted_cafo_load / 10,
+    huc12_weighted_cafo_load_scaled = huc12_weighted_cafo_load / 0.001,
     huc12_nearest_upstream_cafo_dist_scaled = huc12_nearest_upstream_cafo_dist / 1000,
     
     # poultry 
     huc12_upstream_p_cafo_density_scaled = huc12_upstream_poultry_cafo_dens / 0.1,
     huc12_upstream_p_cafo_count_scaled = huc12_upstream_poultry_cafo_coun / 10,
-    huc12_weighted_p_cafo_load_scaled = huc12_weighted_poultry_cafo_load / 10,
+    huc12_weighted_p_cafo_load_scaled = huc12_weighted_poultry_cafo_load / 0.001,
     huc12_nearest_p_upstream_cafo_dist_scaled = huc12_nearest_upstream_poultry_c / 1000,
     
     # other cafo metrics

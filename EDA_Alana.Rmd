@@ -111,10 +111,10 @@ responses <- c('nitlog', 'phoslog', 'feclog')
 
 # poultry CAFO metrics
 metrics <- c(
-  'upstream_poultry_cafo_density',
-  'upstream_poultry_cafo_count',
-  'weighted_poultry_cafo_load',
-  'nearest_upstream_poultry_cafo_di'
+  'huc12_upstream_poultry_cafo_dens',
+  'huc12_upstream_poultry_cafo_coun',
+  'huc12_weighted_poultry_cafo_load',
+  'huc12_nearest_upstream_poultry_c'
 )
 
 # function to make plot for each x and y
@@ -155,10 +155,10 @@ responses <- c('nitlog', 'phoslog', 'feclog')
 
 # CAFO metrics
 metrics <- c(
-  'upstream_cafo_density',
-  'upstream_cafo_count',
-  'weighted_cafo_load',
-  'nearest_upstream_cafo_distance_m'
+  'huc12_upstream_cafo_density',
+  'huc12_upstream_cafo_count',
+  'huc12_weighted_cafo_load',
+  'huc12_nearest_upstream_cafo_dist'
 )
 
 # make all plots
