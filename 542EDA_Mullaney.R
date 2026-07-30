@@ -110,9 +110,23 @@ p_phos_log <- ggplot(water, aes(x = phoslog)) +
   (p_nit_raw | p_nit_log) /
   (p_phos_raw | p_phos_log)
 
+p_fec_log / p_nit_log / p_phos_log
+
 ggsave("eda_01_distributions.png", width = 10, height = 10, dpi = 150)
 
+ch <- ggplot(water, aes(x = dist_pt)) +
+  geom_histogram(fill = "#D85A30", color = "white", linewidth = 0.2) +
+  labs(title = "Phosphorus (log)", x = "log(mg/L)", y = "Count")
 
+ch2 <- ggplot(water, aes(x = huc8_nearest_upstream_cafo_dista)) +
+  geom_histogram(bins = 40, fill = "#D85A30", color = "white", linewidth = 0.2) +
+  labs(title = "huc8 (log)", x = "log(mg/L)", y = "Count")
+
+ch3 <- ggplot(water, aes(x = nearest_upstream_poultry_cafo_di)) +
+  geom_histogram(bins = 40, fill = "#D85A30", color = "white", linewidth = 0.2) +
+  labs(title = "huc6 (log)", x = "log(mg/L)", y = "Count")
+
+ch/ch2/ch3
 # ============================================================
 # 4. EXCEEDANCE RATES
 # ============================================================
@@ -254,6 +268,8 @@ p_temp_month <- monthly |>
   labs(title = "Mean log pollutant levels by month", x = "Month",
        y = "Mean log value", color = NULL)
 
+p_temp_month
+
 ggsave("eda_03b_months.png", width = 10, height = 8, dpi = 150)
 # ============================================================
 # 6. CAFO PREDICTOR RELATIONSHIPS
@@ -298,15 +314,60 @@ scatter_cafo <- function(cafo_col, cafo_label) {
   p1 | p2 | p3
 }
 
-scatter_cafo("weighted_cafo_load", "Upstream weighted CAFO load")
-ggsave("eda_05_cafo_scatter_upstream.png", width = 13, height = 4, dpi = 150)
+# =========================================================
+#             REALLY BIG FIGURE WEIGHTED CAFO LOAD
+# =========================================================
 
-scatter_cafo("huc10_weighted_cafo_load", "HUC10 weighted CAFO load")
-ggsave("eda_06_cafo_scatter_huc10.png", width = 13, height = 4, dpi = 150)
+a <- scatter_cafo("weighted_cafo_load", "Upstream weighted CAFO load")
 
-scatter_cafo("huc12_weighted_cafo_load", "HUC12 weighted CAFO load")
-ggsave("eda_07_cafo_scatter_huc12.png", width = 13, height = 4, dpi = 150)
+b <- scatter_cafo("huc8_weighted_cafo_load", "HUC8 weighted CAFO load")
 
+c <- scatter_cafo("huc10_weighted_cafo_load", "HUC10 weighted CAFO load")
+
+d <- scatter_cafo("huc12_weighted_cafo_load", "HUC12 weighted CAFO load")
+
+# =========================================================
+#             REALLY BIG FIGURE CAFO COUNT
+# =========================================================
+
+a <- scatter_cafo("upstream_cafo_count", "Upstream CAFO count")
+
+b <- scatter_cafo("huc8_upstream_cafo_count", "HUC8 Upstream CAFO count")
+
+c <- scatter_cafo("huc10_upstream_cafo_count", "HUC10 Upstream CAFO count")
+
+d <- scatter_cafo("huc12_upstream_cafo_count", "HUC12 Upstream CAFO count")
+
+a/b/c/d
+
+# =========================================================
+#             REALLY BIG FIGURE CAFO DENSITY
+# =========================================================
+
+a <- scatter_cafo("upstream_cafo_density", "Upstream CAFO density")
+
+b <- scatter_cafo("huc8_upstream_cafo_density", "HUC8 Upstream CAFO density")
+
+c <- scatter_cafo("huc10_upstream_cafo_density", "HUC10 Upstream CAFO density")
+
+d <- scatter_cafo("huc12_upstream_cafo_density", "HUC12 Upstream CAFO density")
+
+a/b/c/d
+
+# =========================================================
+#           REALLY BIG FIGURE NEAREST CAFO DIST
+# =========================================================
+
+a <- scatter_cafo("nearest_upstream_cafo_distance_m", "Nearest upstream CAFO distance")
+
+b <- scatter_cafo("huc8_nearest_upstream_cafo_dista", "HUC8 Nearest upstream CAFO distance")
+
+c <- scatter_cafo("huc10_nearest_upstream_cafo_dist", "HUC10 Nearest upstream CAFO distance")
+
+d <- scatter_cafo("huc12_nearest_upstream_cafo_dist", "HUC12 Nearest upstream CAFO distance")
+
+a/b/c/d
+ 
 # Boxplots: exceedance vs weighted CAFO load
 p_cafo_exceed <- water |>
   select(exceed_fec, weighted_cafo_load, weighted_poultry_cafo_load) |>
@@ -441,9 +502,6 @@ p_station_cafo <- ggplot(station_summary, aes(x = cafo_load_mean, y = feclog_mea
 
 ggsave("eda_10_station_cafo.png", p_station_cafo, width = 8, height = 6, dpi = 150)
 
-
-
-
 # ============================================================
 # 8. CORRELATION MATRIX
 # ============================================================
@@ -485,20 +543,34 @@ ggpairs(cor_vars,
   labs(title = "Correlation matrix — responses and CAFO predictors")
 dev.off()
 
-
 # ============================================================
 # 9. MODEL PREP CHECKS
 # ============================================================
 
 # Observations per station (check for sufficient replication)
 obs_per_station <- water |> count(station_id, name = "n_obs")
+obs_per_station2 <- water |> mean(station_id, name = "n_obs")
+
+
 cat("\n--- Observations per station ---\n")
 print(summary(obs_per_station$n_obs))
 
 p_obs <- ggplot(obs_per_station, aes(x = n_obs)) +
-  geom_histogram(bins = 30, fill = "#7F77DD", color = "white", linewidth = 0.2) +
+  geom_histogram(bins = 300, fill = "#7F77DD", color = "white", linewidth = 0.2) +
   labs(title = "Observations per station", x = "n observations", y = "Count")
 
+library(forcats)
+
+p_obs2 <- ggplot(obs_sorted, aes(x = fct_reorder(station_id, n_obs), y = n_obs)) +
+  geom_col(fill = "#7F77DD", color = "white", linewidth = 0.2)+
+  labs(title = "Observations at each monitoring station", x = "Individual stations", y = "Number of observations")+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+p_obs2
+
+p_obs <- ggplot(obs_per_station, aes(x = n_obs)) +
+  geom_histogram(bins = 16, fill = "#7F77DD", color = "white", linewidth = 0.2) +
+  labs(title = "Observations per station", x = "n observations", y = "Count")
 # Stations per HUC8 (check hierarchy balance)
 stations_per_huc8 <- water |>
   group_by(huc8id) |>
